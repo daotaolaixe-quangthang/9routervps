@@ -258,6 +258,8 @@ export function extractApiKey(request) {
  * Validate API key (optional - for local use can skip)
  */
 export async function isValidApiKey(apiKey) {
-  if (!apiKey) return false;
+  if (!apiKey) {
+    return { ok: false, status: 401, code: "missing", message: "Missing API key" };
+  }
   return await validateApiKey(apiKey);
 }

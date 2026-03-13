@@ -1,4 +1,5 @@
 import "open-sse/index.js";
+import { randomUUID } from "node:crypto";
 
 import {
   getProviderCredentials,
@@ -69,10 +70,10 @@ export async function handleChat(request, clientRawRequest = null) {
       log.warn("AUTH", "Missing API key (requireApiKey=true)");
       return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
     }
-    const valid = await isValidApiKey(apiKey);
-    if (!valid) {
-      log.warn("AUTH", "Invalid API key (requireApiKey=true)");
-      return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
+    const validation = await isValidApiKey(apiKey);
+    if (!validation.ok) {
+      log.warn("AUTH", `${validation.message} (requireApiKey=true)`);
+      return errorResponse(validation.status || HTTP_STATUS.UNAUTHORIZED, validation.message);
     }
   }
 
@@ -130,6 +131,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
   // Extract userAgent from request
   const userAgent = request?.headers?.get("user-agent") || "";
+  const requestId = randomUUID();
 
   // Try with available accounts (fallback on errors)
   let excludeConnectionId = null;
@@ -180,6 +182,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       connectionId: credentials.connectionId,
       userAgent,
       apiKey,
+      requestId,
       // Detect source format by endpoint + body
       sourceFormatOverride: request?.url ? detectFormatByEndpoint(new URL(request.url).pathname, body) : null,
       onCredentialsRefreshed: async (newCreds) => {

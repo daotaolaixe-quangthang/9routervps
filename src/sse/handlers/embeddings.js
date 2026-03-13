@@ -5,6 +5,7 @@ import {
   extractApiKey,
   isValidApiKey,
 } from "../services/auth.js";
+import { randomUUID } from "node:crypto";
 import { getSettings } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
 import { handleEmbeddingsCore } from "open-sse/handlers/embeddingsCore.js";
@@ -48,10 +49,10 @@ export async function handleEmbeddings(request) {
       log.warn("AUTH", "Missing API key (requireApiKey=true)");
       return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
     }
-    const valid = await isValidApiKey(apiKey);
-    if (!valid) {
-      log.warn("AUTH", "Invalid API key (requireApiKey=true)");
-      return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
+    const validation = await isValidApiKey(apiKey);
+    if (!validation.ok) {
+      log.warn("AUTH", `${validation.message} (requireApiKey=true)`);
+      return errorResponse(validation.status || HTTP_STATUS.UNAUTHORIZED, validation.message);
     }
   }
 
@@ -72,6 +73,7 @@ export async function handleEmbeddings(request) {
   }
 
   const { provider, model } = modelInfo;
+  const requestId = randomUUID();
 
   if (modelStr !== `${provider}/${model}`) {
     log.info("ROUTING", `${modelStr} → ${provider}/${model}`);
@@ -122,7 +124,11 @@ export async function handleEmbeddings(request) {
       },
       onRequestSuccess: async () => {
         await clearAccountError(credentials.connectionId, credentials, model);
-      }
+      },
+      connectionId: credentials.connectionId,
+      apiKey,
+      requestId,
+      endpoint: url.pathname,
     });
 
     if (result.success) return result.response;

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { validateApiKey, getProviderConnections, updateProviderConnection } from "@/models";
 
+function authErrorResponse(result) {
+  return NextResponse.json({ error: result.message }, { status: result.status || 401 });
+}
+
 // Update provider credentials (for cloud token refresh)
 export async function PUT(request) {
   try {
@@ -18,9 +22,9 @@ export async function PUT(request) {
     }
 
     // Validate API key
-    const isValid = await validateApiKey(apiKey);
-    if (!isValid) {
-      return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
+    const validation = await validateApiKey(apiKey);
+    if (!validation.ok) {
+      return authErrorResponse(validation);
     }
 
     // Find active connection for provider

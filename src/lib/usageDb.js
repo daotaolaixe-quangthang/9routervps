@@ -66,8 +66,33 @@ if (!isCloud && fs && typeof fs.existsSync === "function") {
 
 // Default data structure
 const defaultData = {
-  history: []
+  history: [],
+  apiKeyUsageApplied: {},
 };
+
+function cloneDefaultData() {
+  return {
+    history: [],
+    apiKeyUsageApplied: {},
+  };
+}
+
+function ensureUsageDbShape(data) {
+  const next = data && typeof data === "object" ? data : {};
+  let changed = false;
+
+  if (!Array.isArray(next.history)) {
+    next.history = [];
+    changed = true;
+  }
+
+  if (!next.apiKeyUsageApplied || typeof next.apiKeyUsageApplied !== "object" || Array.isArray(next.apiKeyUsageApplied)) {
+    next.apiKeyUsageApplied = {};
+    changed = true;
+  }
+
+  return { data: next, changed };
+}
 
 // Singleton instance
 let dbInstance = null;
@@ -189,15 +214,16 @@ export async function getUsageDb() {
   if (isCloud) {
     // Return in-memory DB for Workers
     if (!dbInstance) {
-      dbInstance = new Low({ read: async () => {}, write: async () => {} }, defaultData);
-      dbInstance.data = defaultData;
+      const data = cloneDefaultData();
+      dbInstance = new Low({ read: async () => {}, write: async () => {} }, data);
+      dbInstance.data = data;
     }
     return dbInstance;
   }
 
   if (!dbInstance) {
     const adapter = new JSONFile(DB_FILE);
-    dbInstance = new Low(adapter, defaultData);
+    dbInstance = new Low(adapter, cloneDefaultData());
 
     // Try to read DB with error recovery for corrupt JSON
     try {
@@ -205,7 +231,7 @@ export async function getUsageDb() {
     } catch (error) {
       if (error instanceof SyntaxError) {
         console.warn('[DB] Corrupt Usage JSON detected, resetting to defaults...');
-        dbInstance.data = defaultData;
+        dbInstance.data = cloneDefaultData();
         await dbInstance.write();
       } else {
         throw error;
@@ -214,11 +240,33 @@ export async function getUsageDb() {
 
     // Initialize with default data if empty
     if (!dbInstance.data) {
-      dbInstance.data = defaultData;
+      dbInstance.data = cloneDefaultData();
       await dbInstance.write();
+    } else {
+      const { data, changed } = ensureUsageDbShape(dbInstance.data);
+      dbInstance.data = data;
+      if (changed) {
+        await dbInstance.write();
+      }
     }
   }
   return dbInstance;
+}
+
+export async function hasAppliedApiKeyUsage(requestId) {
+  if (!requestId) return false;
+  const db = await getUsageDb();
+  return Boolean(db.data.apiKeyUsageApplied?.[requestId]);
+}
+
+export async function markApiKeyUsageApplied(requestId, timestamp = new Date().toISOString()) {
+  if (!requestId) return;
+  const db = await getUsageDb();
+  if (!db.data.apiKeyUsageApplied || typeof db.data.apiKeyUsageApplied !== "object") {
+    db.data.apiKeyUsageApplied = {};
+  }
+  db.data.apiKeyUsageApplied[requestId] = timestamp;
+  await db.write();
 }
 
 /**
@@ -249,6 +297,17 @@ export async function saveRequestUsage(entry) {
     // if (db.data.history.length > 10000) db.data.history.shift();
 
     await db.write();
+
+    if (entry.apiKey && entry.requestId) {
+      const { finalizeApiKeyCost } = await import("@/lib/apiKeyQuota.js");
+      await finalizeApiKeyCost({
+        apiKey: entry.apiKey,
+        costUsd: entryCost,
+        requestId: entry.requestId,
+        timestamp: entry.timestamp,
+      });
+    }
+
     statsEmitter.emit("update");
   } catch (error) {
     console.error("Failed to save usage stats:", error);
@@ -381,52 +440,8 @@ export async function getRecentLogs(limit = 200) {
  * @returns {number} Cost in dollars
  */
 async function calculateCost(provider, model, tokens) {
-  if (!tokens || !provider || !model) return 0;
-
-  try {
-    const { getPricingForModel } = await import("@/lib/localDb.js");
-    const pricing = await getPricingForModel(provider, model);
-
-    if (!pricing) return 0;
-
-    let cost = 0;
-
-    // Input tokens (non-cached)
-    const inputTokens = tokens.prompt_tokens || tokens.input_tokens || 0;
-    const cachedTokens = tokens.cached_tokens || tokens.cache_read_input_tokens || 0;
-    const nonCachedInput = Math.max(0, inputTokens - cachedTokens);
-
-    cost += (nonCachedInput * (pricing.input / 1000000));
-
-    // Cached tokens
-    if (cachedTokens > 0) {
-      const cachedRate = pricing.cached || pricing.input; // Fallback to input rate
-      cost += (cachedTokens * (cachedRate / 1000000));
-    }
-
-    // Output tokens
-    const outputTokens = tokens.completion_tokens || tokens.output_tokens || 0;
-    cost += (outputTokens * (pricing.output / 1000000));
-
-    // Reasoning tokens
-    const reasoningTokens = tokens.reasoning_tokens || 0;
-    if (reasoningTokens > 0) {
-      const reasoningRate = pricing.reasoning || pricing.output; // Fallback to output rate
-      cost += (reasoningTokens * (reasoningRate / 1000000));
-    }
-
-    // Cache creation tokens
-    const cacheCreationTokens = tokens.cache_creation_input_tokens || 0;
-    if (cacheCreationTokens > 0) {
-      const cacheCreationRate = pricing.cache_creation || pricing.input; // Fallback to input rate
-      cost += (cacheCreationTokens * (cacheCreationRate / 1000000));
-    }
-
-    return cost;
-  } catch (error) {
-    console.error("Error calculating cost:", error);
-    return 0;
-  }
+  const { calculateRequestCost } = await import("@/lib/calculateRequestCost.js");
+  return calculateRequestCost(provider, model, tokens);
 }
 
 const PERIOD_MS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 };

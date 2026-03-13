@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { validateApiKey, getModelAliases, setModelAlias } from "@/models";
 
+function authErrorResponse(result) {
+  return NextResponse.json({ error: result.message }, { status: result.status || 401 });
+}
+
 // PUT /api/cloud/models/alias - Set model alias (for cloud/CLI)
 export async function PUT(request) {
   try {
@@ -11,9 +15,9 @@ export async function PUT(request) {
       return NextResponse.json({ error: "Missing API key" }, { status: 401 });
     }
 
-    const isValid = await validateApiKey(apiKey);
-    if (!isValid) {
-      return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
+    const validation = await validateApiKey(apiKey);
+    if (!validation.ok) {
+      return authErrorResponse(validation);
     }
 
     const body = await request.json();
@@ -57,9 +61,9 @@ export async function GET(request) {
       return NextResponse.json({ error: "Missing API key" }, { status: 401 });
     }
 
-    const isValid = await validateApiKey(apiKey);
-    if (!isValid) {
-      return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
+    const validation = await validateApiKey(apiKey);
+    if (!validation.ok) {
+      return authErrorResponse(validation);
     }
 
     const aliases = await getModelAliases();

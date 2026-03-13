@@ -3,6 +3,7 @@ import { createErrorResult, parseUpstreamError, formatProviderError } from "../u
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { getExecutor } from "../executors/index.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
+import { saveUsageStats } from "./chatCore/requestDetail.js";
 
 // Google AI (Gemini) provider aliases / identifiers
 const GEMINI_PROVIDERS = new Set(["gemini", "google_ai_studio"]);
@@ -186,7 +187,11 @@ export async function handleEmbeddingsCore({
   credentials,
   log,
   onCredentialsRefreshed,
-  onRequestSuccess
+  onRequestSuccess,
+  connectionId,
+  apiKey,
+  requestId,
+  endpoint,
 }) {
   const { provider, model } = modelInfo;
 
@@ -287,6 +292,16 @@ export async function handleEmbeddingsCore({
   }
 
   const normalized = normalizeEmbeddingsResponse(responseBody, model, provider);
+  saveUsageStats({
+    provider,
+    model,
+    tokens: normalized.usage,
+    connectionId,
+    apiKey,
+    endpoint,
+    requestId,
+    label: "EMBEDDINGS USAGE",
+  });
 
   log?.debug?.("EMBEDDINGS", `Success | usage=${JSON.stringify(normalized.usage || {})}`);
 

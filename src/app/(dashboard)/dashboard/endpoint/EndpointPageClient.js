@@ -19,11 +19,46 @@ const TUNNEL_BENEFITS = [
 
 const TUNNEL_ACTION_TIMEOUT_MS = 90000;
 
+const EMPTY_KEY_FORM = {
+  name: "",
+  costLimitUsd: "",
+  validFrom: "",
+  validUntil: "",
+};
+
+function toDatetimeLocal(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset();
+  const localDate = new Date(date.getTime() - offset * 60000);
+  return localDate.toISOString().slice(0, 16);
+}
+
+function formatCost(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "Unlimited";
+  return `$${Number(value).toFixed(2)}`;
+}
+
+function getStatusBadge(key) {
+  const map = {
+    active: { label: "Active", className: "bg-green-500/10 text-green-600 dark:text-green-400" },
+    paused: { label: "Paused", className: "bg-orange-500/10 text-orange-600 dark:text-orange-400" },
+    expired: { label: "Expired", className: "bg-red-500/10 text-red-600 dark:text-red-400" },
+    quota_exceeded: { label: "Quota exceeded", className: "bg-red-500/10 text-red-600 dark:text-red-400" },
+    not_yet_valid: { label: "Not yet valid", className: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400" },
+  };
+  return map[key.status] || map.active;
+}
+
 export default function APIPageClient({ machineId }) {
   const [keys, setKeys] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newKeyName, setNewKeyName] = useState("");
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [keyForm, setKeyForm] = useState(EMPTY_KEY_FORM);
+  const [editingKey, setEditingKey] = useState(null);
+  const [keyFormError, setKeyFormError] = useState("");
   const [createdKey, setCreatedKey] = useState(null);
 
   /* ========== CLOUD STATE — COMMENTED OUT (replaced by Tunnel) ==========
@@ -246,6 +281,69 @@ export default function APIPageClient({ machineId }) {
     }
   };
 
+  const resetKeyForm = () => {
+    setKeyForm(EMPTY_KEY_FORM);
+    setEditingKey(null);
+    setKeyFormError("");
+  };
+
+  const openCreateModal = () => {
+    resetKeyForm();
+    setShowAddModal(true);
+  };
+
+  const openEditModal = (key) => {
+    setEditingKey(key);
+    setKeyForm({
+      name: key.name || "",
+      costLimitUsd: key.costLimitUsd ?? "",
+      validFrom: toDatetimeLocal(key.validFrom),
+      validUntil: toDatetimeLocal(key.validUntil),
+    });
+    setKeyFormError("");
+    setShowEditModal(true);
+  };
+
+  const buildKeyPayload = () => {
+    const trimmedName = keyForm.name.trim();
+    if (!trimmedName) {
+      setKeyFormError("Key name is required.");
+      return null;
+    }
+
+    const payload = { name: trimmedName };
+    if (keyForm.costLimitUsd !== "") {
+      const costLimitUsd = Number(keyForm.costLimitUsd);
+      if (!Number.isFinite(costLimitUsd) || costLimitUsd < 0) {
+        setKeyFormError("Cost limit must be a non-negative number.");
+        return null;
+      }
+      payload.costLimitUsd = costLimitUsd;
+    } else {
+      payload.costLimitUsd = null;
+    }
+
+    if (keyForm.validFrom) {
+      payload.validFrom = new Date(keyForm.validFrom).toISOString();
+    } else {
+      payload.validFrom = null;
+    }
+
+    if (keyForm.validUntil) {
+      payload.validUntil = new Date(keyForm.validUntil).toISOString();
+    } else {
+      payload.validUntil = null;
+    }
+
+    if (payload.validFrom && payload.validUntil && new Date(payload.validFrom) >= new Date(payload.validUntil)) {
+      setKeyFormError("Valid until must be later than valid from.");
+      return null;
+    }
+
+    setKeyFormError("");
+    return payload;
+  };
+
   const fetchData = async () => {
     try {
       const keysRes = await fetch("/api/keys");
@@ -326,24 +424,53 @@ export default function APIPageClient({ machineId }) {
   };
 
   const handleCreateKey = async () => {
-    if (!newKeyName.trim()) return;
+    const payload = buildKeyPayload();
+    if (!payload) return;
 
     try {
       const res = await fetch("/api/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newKeyName }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
 
       if (res.ok) {
         setCreatedKey(data.key);
         await fetchData();
-        setNewKeyName("");
+        resetKeyForm();
         setShowAddModal(false);
+      } else {
+        setKeyFormError(data.error || "Failed to create key");
       }
     } catch (error) {
       console.log("Error creating key:", error);
+      setKeyFormError(error.message || "Failed to create key");
+    }
+  };
+
+  const handleUpdateKey = async () => {
+    if (!editingKey) return;
+    const payload = buildKeyPayload();
+    if (!payload) return;
+
+    try {
+      const res = await fetch(`/api/keys/${editingKey.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setKeys((prev) => prev.map((key) => key.id === editingKey.id ? data.key : key));
+        setShowEditModal(false);
+        resetKeyForm();
+      } else {
+        setKeyFormError(data.error || "Failed to update key");
+      }
+    } catch (error) {
+      console.log("Error updating key:", error);
+      setKeyFormError(error.message || "Failed to update key");
     }
   };
 
@@ -374,7 +501,8 @@ export default function APIPageClient({ machineId }) {
         body: JSON.stringify({ isActive }),
       });
       if (res.ok) {
-        setKeys(prev => prev.map(k => k.id === id ? { ...k, isActive } : k));
+        const data = await res.json();
+        setKeys(prev => prev.map(k => k.id === id ? data.key : k));
       }
     } catch (error) {
       console.log("Error toggling key:", error);
@@ -489,7 +617,7 @@ export default function APIPageClient({ machineId }) {
       <Card>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">API Keys</h2>
-          <Button icon="add" onClick={() => setShowAddModal(true)}>
+          <Button icon="add" onClick={openCreateModal}>
             Create Key
           </Button>
         </div>
@@ -514,7 +642,7 @@ export default function APIPageClient({ machineId }) {
             </div>
             <p className="text-text-main font-medium mb-1">No API keys yet</p>
             <p className="text-sm text-text-muted mb-4">Create your first API key to get started</p>
-            <Button icon="add" onClick={() => setShowAddModal(true)}>
+            <Button icon="add" onClick={openCreateModal}>
               Create Key
             </Button>
           </div>
@@ -526,7 +654,12 @@ export default function APIPageClient({ machineId }) {
                 className={`group flex items-center justify-between py-3 border-b border-black/[0.03] dark:border-white/[0.03] last:border-b-0 ${key.isActive === false ? "opacity-60" : ""}`}
               >
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{key.name}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium">{key.name}</p>
+                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${getStatusBadge(key).className}`}>
+                      {getStatusBadge(key).label}
+                    </span>
+                  </div>
                   <div className="flex items-center gap-2 mt-1">
                     <code className="text-xs text-text-muted font-mono">
                       {visibleKeys.has(key.id) ? key.key : maskKey(key.key)}
@@ -552,11 +685,28 @@ export default function APIPageClient({ machineId }) {
                   <p className="text-xs text-text-muted mt-1">
                     Created {new Date(key.createdAt).toLocaleDateString()}
                   </p>
-                  {key.isActive === false && (
-                    <p className="text-xs text-orange-500 mt-1">Paused</p>
+                  <p className="text-xs text-text-muted mt-1">
+                    Used {formatCost(key.costUsedUsd)} {key.costLimitUsd !== null ? `/ ${formatCost(key.costLimitUsd)}` : "/ Unlimited"}
+                  </p>
+                  {key.costLimitUsd !== null && (
+                    <p className="text-xs text-text-muted mt-1">
+                      Remaining {formatCost(key.remainingUsd)}
+                    </p>
+                  )}
+                  {(key.validFrom || key.validUntil) && (
+                    <p className="text-xs text-text-muted mt-1">
+                      Valid {key.validFrom ? new Date(key.validFrom).toLocaleString() : "Any time"} {" -> "} {key.validUntil ? new Date(key.validUntil).toLocaleString() : "No expiry"}
+                    </p>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => openEditModal(key)}
+                    className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-all"
+                    title="Edit key"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">edit</span>
+                  </button>
                   <Toggle
                     size="sm"
                     checked={key.isActive ?? true}
@@ -594,24 +744,105 @@ export default function APIPageClient({ machineId }) {
         title="Create API Key"
         onClose={() => {
           setShowAddModal(false);
-          setNewKeyName("");
+          resetKeyForm();
         }}
       >
         <div className="flex flex-col gap-4">
           <Input
             label="Key Name"
-            value={newKeyName}
-            onChange={(e) => setNewKeyName(e.target.value)}
+            value={keyForm.name}
+            onChange={(e) => setKeyForm((prev) => ({ ...prev, name: e.target.value }))}
             placeholder="Production Key"
           />
+          <Input
+            label="Cost Limit (USD)"
+            type="number"
+            min="0"
+            step="0.01"
+            value={keyForm.costLimitUsd}
+            onChange={(e) => setKeyForm((prev) => ({ ...prev, costLimitUsd: e.target.value }))}
+            placeholder="10"
+            hint="Leave blank for unlimited usage."
+          />
+          <Input
+            label="Valid From"
+            type="datetime-local"
+            value={keyForm.validFrom}
+            onChange={(e) => setKeyForm((prev) => ({ ...prev, validFrom: e.target.value }))}
+            hint="Optional start time."
+          />
+          <Input
+            label="Valid Until"
+            type="datetime-local"
+            value={keyForm.validUntil}
+            onChange={(e) => setKeyForm((prev) => ({ ...prev, validUntil: e.target.value }))}
+            hint="Optional expiration time."
+          />
+          {keyFormError && <p className="text-sm text-red-500">{keyFormError}</p>}
           <div className="flex gap-2">
-            <Button onClick={handleCreateKey} fullWidth disabled={!newKeyName.trim()}>
+            <Button onClick={handleCreateKey} fullWidth disabled={!keyForm.name.trim()}>
               Create
             </Button>
             <Button
               onClick={() => {
                 setShowAddModal(false);
-                setNewKeyName("");
+                resetKeyForm();
+              }}
+              variant="ghost"
+              fullWidth
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showEditModal}
+        title="Edit API Key"
+        onClose={() => {
+          setShowEditModal(false);
+          resetKeyForm();
+        }}
+      >
+        <div className="flex flex-col gap-4">
+          <Input
+            label="Key Name"
+            value={keyForm.name}
+            onChange={(e) => setKeyForm((prev) => ({ ...prev, name: e.target.value }))}
+            placeholder="Production Key"
+          />
+          <Input
+            label="Cost Limit (USD)"
+            type="number"
+            min="0"
+            step="0.01"
+            value={keyForm.costLimitUsd}
+            onChange={(e) => setKeyForm((prev) => ({ ...prev, costLimitUsd: e.target.value }))}
+            placeholder="10"
+            hint="Leave blank for unlimited usage."
+          />
+          <Input
+            label="Valid From"
+            type="datetime-local"
+            value={keyForm.validFrom}
+            onChange={(e) => setKeyForm((prev) => ({ ...prev, validFrom: e.target.value }))}
+          />
+          <Input
+            label="Valid Until"
+            type="datetime-local"
+            value={keyForm.validUntil}
+            onChange={(e) => setKeyForm((prev) => ({ ...prev, validUntil: e.target.value }))}
+          />
+          {keyFormError && <p className="text-sm text-red-500">{keyFormError}</p>}
+          <div className="flex gap-2">
+            <Button onClick={handleUpdateKey} fullWidth disabled={!keyForm.name.trim()}>
+              Save
+            </Button>
+            <Button
+              onClick={() => {
+                setShowEditModal(false);
+                resetKeyForm();
               }}
               variant="ghost"
               fullWidth

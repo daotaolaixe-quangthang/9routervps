@@ -96,6 +96,74 @@ function cloneDefaultData() {
   };
 }
 
+function normalizeFiniteNumber(value, fallback = 0) {
+  const num = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function normalizeOptionalNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const num = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function normalizeOptionalIso(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+export function normalizeApiKeyRecord(apiKey = {}) {
+  return {
+    ...apiKey,
+    isActive: apiKey.isActive !== false,
+    costLimitUsd: (() => {
+      const value = normalizeOptionalNumber(apiKey.costLimitUsd);
+      return value === null ? null : Math.max(0, value);
+    })(),
+    costUsedUsd: Math.max(0, normalizeFiniteNumber(apiKey.costUsedUsd, 0)),
+    validFrom: normalizeOptionalIso(apiKey.validFrom),
+    validUntil: normalizeOptionalIso(apiKey.validUntil),
+    lastUsedAt: normalizeOptionalIso(apiKey.lastUsedAt),
+    disabledReason: typeof apiKey.disabledReason === "string" && apiKey.disabledReason.trim()
+      ? apiKey.disabledReason.trim()
+      : null,
+  };
+}
+
+export function getApiKeyStatus(apiKey, now = new Date()) {
+  const record = normalizeApiKeyRecord(apiKey);
+  const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  const validFromMs = record.validFrom ? new Date(record.validFrom).getTime() : null;
+  const validUntilMs = record.validUntil ? new Date(record.validUntil).getTime() : null;
+
+  let status = "active";
+  let disabledReason = null;
+
+  if (record.isActive === false) {
+    status = "paused";
+  } else if (validFromMs && validFromMs > nowMs) {
+    status = "not_yet_valid";
+  } else if (validUntilMs && validUntilMs < nowMs) {
+    status = "expired";
+    disabledReason = "expired";
+  } else if (record.costLimitUsd !== null && record.costUsedUsd >= record.costLimitUsd) {
+    status = "quota_exceeded";
+    disabledReason = "quota_exceeded";
+  }
+
+  const remainingUsd = record.costLimitUsd === null
+    ? null
+    : Math.max(0, record.costLimitUsd - record.costUsedUsd);
+
+  return {
+    ...record,
+    status,
+    remainingUsd,
+    disabledReason,
+  };
+}
+
 function ensureDbShape(data) {
   const defaults = cloneDefaultData();
   const next = data && typeof data === "object" ? data : {};
@@ -140,14 +208,15 @@ function ensureDbShape(data) {
       }
     }
 
-    // Migrate existing API keys to have isActive
+    // Migrate existing API keys to the latest schema
     if (key === "apiKeys" && Array.isArray(next.apiKeys)) {
-      for (const apiKey of next.apiKeys) {
-        if (apiKey.isActive === undefined || apiKey.isActive === null) {
-          apiKey.isActive = true;
+      next.apiKeys = next.apiKeys.map((apiKey) => {
+        const normalized = normalizeApiKeyRecord(apiKey);
+        if (JSON.stringify(normalized) !== JSON.stringify(apiKey)) {
           changed = true;
         }
-      }
+        return normalized;
+      });
     }
   }
 
@@ -744,7 +813,7 @@ export async function deleteCombo(id) {
  */
 export async function getApiKeys() {
   const db = await getDb();
-  return db.data.apiKeys || [];
+  return (db.data.apiKeys || []).map((key) => getApiKeyStatus(key));
 }
 
 /**
@@ -764,7 +833,7 @@ function generateShortKey() {
  * @param {string} name - Key name
  * @param {string} machineId - MachineId (required)
  */
-export async function createApiKey(name, machineId) {
+export async function createApiKey(name, machineId, options = {}) {
   if (!machineId) {
     throw new Error("machineId is required");
   }
@@ -776,19 +845,25 @@ export async function createApiKey(name, machineId) {
   const { generateApiKeyWithMachine } = await import("@/shared/utils/apiKey");
   const result = generateApiKeyWithMachine(machineId);
   
-  const apiKey = {
+  const apiKey = normalizeApiKeyRecord({
     id: uuidv4(),
     name: name,
     key: result.key,
     machineId: machineId,
     isActive: true,
     createdAt: now,
-  };
+    costLimitUsd: options.costLimitUsd ?? null,
+    costUsedUsd: 0,
+    validFrom: options.validFrom ?? null,
+    validUntil: options.validUntil ?? null,
+    lastUsedAt: null,
+    disabledReason: null,
+  });
   
   db.data.apiKeys.push(apiKey);
   await db.write();
   
-  return apiKey;
+  return getApiKeyStatus(apiKey);
 }
 
 /**
@@ -811,7 +886,17 @@ export async function deleteApiKey(id) {
  */
 export async function getApiKeyById(id) {
   const db = await getDb();
-  return db.data.apiKeys.find(k => k.id === id) || null;
+  const found = db.data.apiKeys.find(k => k.id === id);
+  return found ? getApiKeyStatus(found) : null;
+}
+
+/**
+ * Get API key by raw key value
+ */
+export async function getApiKeyByValue(key) {
+  const db = await getDb();
+  const found = db.data.apiKeys.find(k => k.key === key);
+  return found ? getApiKeyStatus(found) : null;
 }
 
 /**
@@ -821,21 +906,46 @@ export async function updateApiKey(id, data) {
   const db = await getDb();
   const index = db.data.apiKeys.findIndex(k => k.id === id);
   if (index === -1) return null;
-  db.data.apiKeys[index] = {
+  db.data.apiKeys[index] = normalizeApiKeyRecord({
     ...db.data.apiKeys[index],
     ...data,
-  };
+  });
   await db.write();
-  return db.data.apiKeys[index];
+  return getApiKeyStatus(db.data.apiKeys[index]);
 }
 
 /**
  * Validate API key
  */
 export async function validateApiKey(key) {
-  const db = await getDb();
-  const found = db.data.apiKeys.find(k => k.key === key);
-  return found && found.isActive !== false;
+  if (!key) {
+    return { ok: false, status: 401, code: "missing", message: "Missing API key" };
+  }
+
+  const found = await getApiKeyByValue(key);
+  if (!found) {
+    return { ok: false, status: 401, code: "invalid", message: "Invalid API key" };
+  }
+
+  if (found.status === "paused") {
+    return { ok: false, status: 403, code: "inactive", message: "API key is not active", keyRecord: found };
+  }
+  if (found.status === "not_yet_valid") {
+    return { ok: false, status: 403, code: "not_yet_valid", message: "API key is not valid yet", keyRecord: found };
+  }
+  if (found.status === "expired") {
+    return { ok: false, status: 403, code: "expired", message: "API key has expired", keyRecord: found };
+  }
+  if (found.status === "quota_exceeded") {
+    return { ok: false, status: 403, code: "quota_exceeded", message: "API key quota exceeded", keyRecord: found };
+  }
+
+  return { ok: true, status: 200, code: "ok", message: "API key is valid", keyRecord: found };
+}
+
+export async function validateApiKeyBoolean(key) {
+  const result = await validateApiKey(key);
+  return result.ok;
 }
 
 // ============ Data Cleanup ============

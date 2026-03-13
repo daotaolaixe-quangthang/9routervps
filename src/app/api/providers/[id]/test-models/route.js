@@ -8,7 +8,7 @@ import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/sha
  */
 async function getInternalApiKey() {
   const keys = await getApiKeys();
-  return keys.find((k) => k.isActive !== false)?.key || null;
+  return keys.find((k) => k.status === "active")?.key || null;
 }
 
 /**
@@ -106,6 +106,11 @@ export async function POST(request, { params }) {
 }
 
 function getBaseUrl(request) {
+  // Prefer BASE_URL env var for internal server-side fetches.
+  // On VPS behind Cloudflare Access, using the public domain would
+  // require CF auth cookies that server doesn't have → 500 error.
+  if (process.env.BASE_URL) return process.env.BASE_URL;
+  if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL;
   const url = new URL(request.url);
   return `${url.protocol}//${url.host}`;
 }

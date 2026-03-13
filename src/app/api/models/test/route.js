@@ -7,15 +7,21 @@ export async function POST(request) {
     const { model } = await request.json();
     if (!model) return NextResponse.json({ error: "Model required" }, { status: 400 });
 
+    // Prefer BASE_URL env var for internal server-side fetches.
+    // On VPS behind Cloudflare Access, using the public domain would
+    // require CF auth cookies that server doesn't have → 500 error.
     const url = new URL(request.url);
-    const baseUrl = `${url.protocol}//${url.host}`;
+    const baseUrl =
+      process.env.BASE_URL ||
+      process.env.NEXT_PUBLIC_BASE_URL ||
+      `${url.protocol}//${url.host}`;
 
     // Get an active internal API key for auth (if requireApiKey is enabled)
     let apiKey = null;
     try {
       const keys = await getApiKeys();
-      apiKey = keys.find((k) => k.isActive !== false)?.key || null;
-    } catch {}
+      apiKey = keys.find((k) => k.status === "active")?.key || null;
+    } catch { }
 
     const headers = { "Content-Type": "application/json" };
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
@@ -38,7 +44,7 @@ export async function POST(request) {
     let parsed = null;
     try {
       parsed = rawText ? JSON.parse(rawText) : null;
-    } catch {}
+    } catch { }
 
     if (!res.ok) {
       const detail = parsed?.error?.message || parsed?.msg || parsed?.message || parsed?.error || rawText;

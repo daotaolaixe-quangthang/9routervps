@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { validateApiKey, getModelAliases } from "@/models";
 
+function authErrorResponse(result) {
+  return NextResponse.json({ error: result.message }, { status: result.status || 401 });
+}
+
 // Resolve model alias to provider/model
 export async function POST(request) {
   try {
@@ -19,9 +23,9 @@ export async function POST(request) {
     }
 
     // Validate API key
-    const isValid = await validateApiKey(apiKey);
-    if (!isValid) {
-      return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
+    const validation = await validateApiKey(apiKey);
+    if (!validation.ok) {
+      return authErrorResponse(validation);
     }
 
     // Get model aliases

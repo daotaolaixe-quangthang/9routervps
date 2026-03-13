@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { validateApiKey, getProviderConnections, getModelAliases } from "@/models";
 
+function authErrorResponse(result) {
+  return NextResponse.json({ error: result.message }, { status: result.status || 401 });
+}
+
 // Verify API key and return provider credentials
 export async function POST(request) {
   try {
@@ -12,9 +16,9 @@ export async function POST(request) {
     const apiKey = authHeader.slice(7);
 
     // Validate API key
-    const isValid = await validateApiKey(apiKey);
-    if (!isValid) {
-      return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
+    const validation = await validateApiKey(apiKey);
+    if (!validation.ok) {
+      return authErrorResponse(validation);
     }
 
     // Get active provider connections
