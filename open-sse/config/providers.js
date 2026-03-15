@@ -294,4 +294,20 @@ export const PROVIDERS = {
     baseUrl: "https://ollama.com/api/chat",
     format: "ollama"
   },
+  "ollama-local": {
+    baseUrl: "http://localhost:11434/api/chat",
+    format: "ollama"
+  },
+  // Vertex AI - Gemini models via Service Account JSON
+  // baseUrl is not used; VertexExecutor.buildUrl() constructs it dynamically
+  vertex: {
+    baseUrl: "https://aiplatform.googleapis.com",
+    format: "gemini"
+  },
+  // Vertex AI - Partner models (Claude, Llama, Mistral, GLM) via SA JSON
+  // Uses OpenAI-compatible global endpoint (or rawPredict for Anthropic)
+  "vertex-partner": {
+    baseUrl: "https://aiplatform.googleapis.com",
+    format: "openai"
+  },
 };
