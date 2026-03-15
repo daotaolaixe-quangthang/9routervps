@@ -3,7 +3,7 @@
 This kit implements the agreed architecture:
 - `9router` runs locally on `127.0.0.1:20128` via `systemd`.
 - Nginx is the only public entrypoint (`80/443`).
-- `ai.<your-domain>` is protected by Cloudflare Access.
+- `router.<your-domain>` is protected by Cloudflare Access.
 - Other Node/PHP services can run simultaneously on the same VPS.
 
 ## Folder layout
@@ -50,7 +50,7 @@ openssl rand -hex 32
 ```
 6. Configure Nginx routes:
 ```bash
-sudo AI_DOMAIN=ai.yourdomain.com API_DOMAIN=api.yourdomain.com WEB_DOMAIN=www.yourdomain.com \
+sudo AI_DOMAIN=router.yourdomain.com API_DOMAIN=api.yourdomain.com WEB_DOMAIN=www.yourdomain.com \
   PHP_DOMAIN=php.yourdomain.com PHP_VERSION=8.3 \
   bash ops/vps-9router/scripts/4-configure-nginx-sites.sh
 ```
@@ -59,18 +59,18 @@ Optional: enable sample Node services:
 sudo DEPLOY_USER=deploy bash ops/vps-9router/scripts/6-enable-sample-node-services.sh
 ```
 7. Configure TLS certs (Let's Encrypt or Cloudflare Origin cert).
-8. Configure Cloudflare Access for `ai.yourdomain.com`:
+8. Configure Cloudflare Access for `router.yourdomain.com`:
 - Follow `docs/cloudflare-access-checklist.md`.
 9. Verify deployment:
 ```bash
-sudo AI_DOMAIN=ai.yourdomain.com bash ops/vps-9router/scripts/5-verify-stack.sh
+sudo AI_DOMAIN=router.yourdomain.com bash ops/vps-9router/scripts/5-verify-stack.sh
 ```
 
 ## Important security defaults
 1. `20128` must not be opened in firewall.
 2. Keep `REQUIRE_API_KEY=true`.
 3. Keep backend services bound to loopback only.
-4. Do not expose `dashboard` on any public subdomain except protected `ai.<domain>`.
+4. Do not expose `dashboard` on any public subdomain except protected `router.<domain>`.
 
 ## Running other services on same VPS
 1. Node API example port: `127.0.0.1:3001` + `templates/api-service-a.service`.

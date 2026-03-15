@@ -6,7 +6,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
-AI_DOMAIN="${AI_DOMAIN:-ai.example.com}"
+AI_DOMAIN="${AI_DOMAIN:-router.example.com}"
 API_DOMAIN="${API_DOMAIN:-api.example.com}"
 WEB_DOMAIN="${WEB_DOMAIN:-www.example.com}"
 PHP_DOMAIN="${PHP_DOMAIN:-php.example.com}"

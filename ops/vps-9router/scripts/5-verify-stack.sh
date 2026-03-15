@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-AI_DOMAIN="${AI_DOMAIN:-ai.example.com}"
+AI_DOMAIN="${AI_DOMAIN:-router.example.com}"
 
 echo "== systemd services =="
 systemctl is-active nginx
