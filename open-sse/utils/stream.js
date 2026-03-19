@@ -228,6 +228,9 @@ export function createSSEStream(options = {}) {
 
         if (translated?.length > 0) {
           for (const item of translated) {
+            // Skip null/undefined items (translateResponse may return null for events with no equivalent)
+            if (item === null || item === undefined) continue;
+
             // Filter empty chunks
             if (!hasValuableContent(item, sourceFormat)) {
               continue; // Skip this empty chunk
@@ -310,6 +313,7 @@ export function createSSEStream(options = {}) {
 
             if (translated?.length > 0) {
               for (const item of translated) {
+                if (item === null || item === undefined) continue;
                 const output = formatSSE(item, sourceFormat);
                 reqLogger?.appendConvertedChunk?.(output);
                 controller.enqueue(sharedEncoder.encode(output));
@@ -329,6 +333,7 @@ export function createSSEStream(options = {}) {
 
         if (flushed?.length > 0) {
           for (const item of flushed) {
+            if (item === null || item === undefined) continue;
             const output = formatSSE(item, sourceFormat);
             reqLogger?.appendConvertedChunk?.(output);
             controller.enqueue(sharedEncoder.encode(output));
