@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode } from "@/models";
+import { deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode, getModelAliases, deleteModelAlias } from "@/models";
 
 // PUT /api/provider-nodes/[id] - Update provider node
 export async function PUT(request, { params }) {
@@ -83,6 +83,14 @@ export async function DELETE(request, { params }) {
     }
 
     await deleteProviderConnectionsByProvider(id);
+
+    // Cascade: delete all model aliases that point to this provider node
+    const aliases = await getModelAliases();
+    const orphanedAliases = Object.entries(aliases)
+      .filter(([, model]) => model.startsWith(`${id}/`))
+      .map(([alias]) => alias);
+    await Promise.all(orphanedAliases.map((alias) => deleteModelAlias(alias)));
+
     await deleteProviderNode(id);
 
     return NextResponse.json({ success: true });

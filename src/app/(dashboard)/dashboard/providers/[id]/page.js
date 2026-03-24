@@ -40,23 +40,23 @@ export default function ProviderDetailPage() {
 
   const providerInfo = providerNode
     ? {
-        id: providerNode.id,
-        name: providerNode.name || (providerNode.type === "anthropic-compatible" ? "Anthropic Compatible" : "OpenAI Compatible"),
-        color: providerNode.type === "anthropic-compatible" ? "#D97757" : "#10A37F",
-        textIcon: providerNode.type === "anthropic-compatible" ? "AC" : "OC",
-        apiType: providerNode.apiType,
-        baseUrl: providerNode.baseUrl,
-        type: providerNode.type,
-      }
+      id: providerNode.id,
+      name: providerNode.name || (providerNode.type === "anthropic-compatible" ? "Anthropic Compatible" : "OpenAI Compatible"),
+      color: providerNode.type === "anthropic-compatible" ? "#D97757" : "#10A37F",
+      textIcon: providerNode.type === "anthropic-compatible" ? "AC" : "OC",
+      apiType: providerNode.apiType,
+      baseUrl: providerNode.baseUrl,
+      type: providerNode.type,
+    }
     : (OAUTH_PROVIDERS[providerId] || APIKEY_PROVIDERS[providerId] || FREE_PROVIDERS[providerId]);
   const isOAuth = !!OAUTH_PROVIDERS[providerId] || !!FREE_PROVIDERS[providerId];
   const models = getModelsByProviderId(providerId);
   const providerAlias = getProviderAlias(providerId);
-  
+
   const isOpenAICompatible = isOpenAICompatibleProvider(providerId);
   const isAnthropicCompatible = isAnthropicCompatibleProvider(providerId);
   const isCompatible = isOpenAICompatible || isAnthropicCompatible;
-  
+
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
   const providerDisplayAlias = isCompatible
     ? (providerNode?.prefix || providerId)
@@ -589,7 +589,7 @@ export default function ProviderDetailPage() {
             alias={model.alias}
             copied={copied}
             onCopy={copy}
-            onSetAlias={() => {}}
+            onSetAlias={() => { }}
             onDeleteAlias={() => handleDeleteAlias(model.alias)}
             testStatus={modelTestResults[model.id]}
             onTest={connections.length > 0 ? () => handleTestModel(model.id) : undefined}
@@ -617,7 +617,7 @@ export default function ProviderDetailPage() {
         <CardSkeleton />
       </div>
     );
-}
+  }
 
   if (!providerInfo) {
     return (
@@ -904,14 +904,14 @@ function ModelRow({ model, fullModel, alias, copied, onCopy, testStatus, isCusto
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
     : testStatus === "error"
-    ? "border-red-500/40"
-    : "border-border";
+      ? "border-red-500/40"
+      : "border-border";
 
   const iconColor = testStatus === "ok"
     ? "#22c55e"
     : testStatus === "error"
-    ? "#ef4444"
-    : undefined;
+      ? "#ef4444"
+      : undefined;
 
   return (
     <div className={`group px-3 py-2 rounded-lg border ${borderColor} hover:bg-sidebar/50`}>
@@ -998,13 +998,13 @@ function PassthroughModelsSection({ providerAlias, modelAliases, copied, onCopy,
     if (!newModel.trim() || adding) return;
     const modelId = newModel.trim();
     const defaultAlias = generateDefaultAlias(modelId);
-    
+
     // Check if alias already exists
     if (modelAliases[defaultAlias]) {
       alert(`Alias "${defaultAlias}" already exists. Please use a different model or edit existing alias.`);
       return;
     }
-    
+
     setAdding(true);
     try {
       await onSetAlias(modelId, defaultAlias);
@@ -1069,18 +1069,72 @@ PassthroughModelsSection.propTypes = {
   onDeleteAlias: PropTypes.func.isRequired,
 };
 
-function PassthroughModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting }) {
+function PassthroughModelRow({ alias, modelId, fullModel, providerDisplayAlias, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting, isEditing, onEdit, onSaveEdit, onCancelEdit }) {
+  const [editAlias, setEditAlias] = useState(alias || "");
+  const [editModelId, setEditModelId] = useState(modelId || "");
+
+  // Reset edit fields when entering edit mode
+  useEffect(() => {
+    if (isEditing) {
+      setEditAlias(alias || "");
+      setEditModelId(modelId || "");
+    }
+  }, [isEditing, alias, modelId]);
+
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
     : testStatus === "error"
-    ? "border-red-500/40"
-    : "border-border";
+      ? "border-red-500/40"
+      : isEditing
+        ? "border-primary/60"
+        : "border-border";
 
-  const iconColor = testStatus === "ok"
-    ? "#22c55e"
-    : testStatus === "error"
-    ? "#ef4444"
-    : undefined;
+  const iconColor = testStatus === "ok" ? "#22c55e" : testStatus === "error" ? "#ef4444" : undefined;
+  const displayTitle = alias || modelId;
+  const displaySubtitle = providerDisplayAlias ? `${providerDisplayAlias}/${modelId}` : fullModel;
+
+  if (isEditing) {
+    return (
+      <div className={`flex flex-col gap-2 p-3 rounded-lg border ${borderColor} bg-sidebar/30`}>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex-1 min-w-[160px]">
+            <label className="text-[10px] text-text-muted mb-0.5 block font-medium uppercase tracking-wide">Alias Model (client gọi)</label>
+            <input
+              type="text"
+              value={editAlias}
+              onChange={(e) => setEditAlias(e.target.value)}
+              placeholder="claude-opus-4-5-20251101"
+              className="w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:border-primary font-mono"
+              autoFocus
+            />
+          </div>
+          <span className="material-symbols-outlined text-text-muted text-base mt-4">arrow_forward</span>
+          <div className="flex-1 min-w-[160px]">
+            <label className="text-[10px] text-text-muted mb-0.5 block font-medium uppercase tracking-wide">Model ID 9Router</label>
+            <input
+              type="text"
+              value={editModelId}
+              onChange={(e) => setEditModelId(e.target.value)}
+              placeholder="cx/gpt-5.4"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onSaveEdit(editAlias, editModelId);
+                if (e.key === "Escape") onCancelEdit();
+              }}
+              className="w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:border-primary font-mono"
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={() => onSaveEdit(editAlias.trim(), editModelId.trim())} disabled={!editAlias.trim() || !editModelId.trim()}>
+            Save
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onCancelEdit}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`flex items-center gap-3 p-3 rounded-lg border ${borderColor} hover:bg-sidebar/50`}>
@@ -1092,17 +1146,16 @@ function PassthroughModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias
       </span>
 
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{modelId}</p>
-
+        <p className="text-sm font-medium truncate">{displayTitle}</p>
         <div className="flex items-center gap-1 mt-1">
-          <code className="text-xs text-text-muted font-mono bg-sidebar px-1.5 py-0.5 rounded">{fullModel}</code>
+          <code className="text-xs text-text-muted font-mono bg-sidebar px-1.5 py-0.5 rounded">{displaySubtitle}</code>
           <button
-            onClick={() => onCopy(fullModel, `model-${modelId}`)}
+            onClick={() => onCopy(displaySubtitle, `model-${alias || modelId}`)}
             className="p-0.5 hover:bg-sidebar rounded text-text-muted hover:text-primary"
             title="Copy model"
           >
             <span className="material-symbols-outlined text-sm">
-              {copied === `model-${modelId}` ? "check" : "content_copy"}
+              {copied === `model-${alias || modelId}` ? "check" : "content_copy"}
             </span>
           </button>
           {onTest && (
@@ -1120,6 +1173,15 @@ function PassthroughModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias
         </div>
       </div>
 
+      {/* Edit button */}
+      <button
+        onClick={onEdit}
+        className="p-1 hover:bg-sidebar rounded text-text-muted hover:text-primary transition-colors"
+        title="Edit alias"
+      >
+        <span className="material-symbols-outlined text-sm">edit</span>
+      </button>
+
       {/* Delete button */}
       <button
         onClick={onDeleteAlias}
@@ -1133,22 +1195,31 @@ function PassthroughModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias
 }
 
 PassthroughModelRow.propTypes = {
+  alias: PropTypes.string,
   modelId: PropTypes.string.isRequired,
   fullModel: PropTypes.string.isRequired,
+  providerDisplayAlias: PropTypes.string,
   copied: PropTypes.string,
   onCopy: PropTypes.func.isRequired,
   onDeleteAlias: PropTypes.func.isRequired,
   onTest: PropTypes.func,
   testStatus: PropTypes.oneOf(["ok", "error"]),
   isTesting: PropTypes.bool,
+  isEditing: PropTypes.bool,
+  onEdit: PropTypes.func,
+  onSaveEdit: PropTypes.func,
+  onCancelEdit: PropTypes.func,
 };
 
 function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, copied, onCopy, onSetAlias, onDeleteAlias, connections, isAnthropic }) {
+  const [newAlias, setNewAlias] = useState("");
   const [newModel, setNewModel] = useState("");
+  const [addError, setAddError] = useState("");
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [testingModelId, setTestingModelId] = useState(null);
   const [modelTestResults, setModelTestResults] = useState({});
+  const [editingAlias, setEditingAlias] = useState(null); // alias key being edited
 
   const handleTestModel = async (modelId) => {
     if (testingModelId) return;
@@ -1178,39 +1249,53 @@ function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, m
     alias,
   }));
 
-  const generateDefaultAlias = (modelId) => {
-    const parts = modelId.split("/");
-    return parts[parts.length - 1];
-  };
-
-  const resolveAlias = (modelId) => {
-    const fullModel = `${providerStorageAlias}/${modelId}`;
-    // Skip if this exact model already has an alias
-    if (Object.values(modelAliases).includes(fullModel)) return null;
-    const baseAlias = generateDefaultAlias(modelId);
-    if (!modelAliases[baseAlias]) return baseAlias;
-    const prefixedAlias = `${providerDisplayAlias}-${baseAlias}`;
-    if (!modelAliases[prefixedAlias]) return prefixedAlias;
-    return null;
-  };
-
   const handleAdd = async () => {
-    if (!newModel.trim() || adding) return;
-    const modelId = newModel.trim();
-    const resolvedAlias = resolveAlias(modelId);
-    if (!resolvedAlias) {
-      alert("All suggested aliases already exist. Please choose a different model or remove conflicting aliases.");
+    const aliasVal = newAlias.trim();
+    const modelVal = newModel.trim();
+    if (!aliasVal || !modelVal || adding) return;
+
+    // Validate: alias must not already exist
+    if (modelAliases[aliasVal]) {
+      setAddError(`Alias "${aliasVal}" đã tồn tại → đang trỏ đến "${modelAliases[aliasVal]}"`);
       return;
     }
 
+    setAddError("");
     setAdding(true);
     try {
-      await onSetAlias(modelId, resolvedAlias, providerStorageAlias);
+      await onSetAlias(modelVal, aliasVal, providerStorageAlias);
+      setNewAlias("");
       setNewModel("");
     } catch (error) {
       console.log("Error adding model:", error);
     } finally {
       setAdding(false);
+    }
+  };
+
+  const handleSaveEdit = async (oldAlias, newAliasVal, newModelIdVal) => {
+    if (!newAliasVal || !newModelIdVal) return;
+
+    // If alias changed, check new alias doesn't conflict with ANOTHER alias
+    if (newAliasVal !== oldAlias && modelAliases[newAliasVal]) {
+      alert(`Alias "${newAliasVal}" đã tồn tại → đang trỏ đến "${modelAliases[newAliasVal]}"`);
+      return;
+    }
+
+    try {
+      if (newAliasVal === oldAlias) {
+        // Only modelId changed — update in-place: create new mapping first
+        // then delete old only if create succeeded (same alias key, server may reject duplicate)
+        await onSetAlias(newModelIdVal, newAliasVal, providerStorageAlias);
+      } else {
+        // Alias key is changing — create new alias first, then delete old.
+        // This way, if create fails, old alias is preserved (no data loss).
+        await onSetAlias(newModelIdVal, newAliasVal, providerStorageAlias);
+        await onDeleteAlias(oldAlias);
+      }
+      setEditingAlias(null);
+    } catch (error) {
+      console.log("Error saving edit:", error);
     }
   };
 
@@ -1236,13 +1321,15 @@ function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, m
       for (const model of models) {
         const modelId = model.id || model.name || model.model;
         if (!modelId) continue;
-        const resolvedAlias = resolveAlias(modelId);
-        if (!resolvedAlias) continue;
-        await onSetAlias(modelId, resolvedAlias, providerStorageAlias);
+        // Auto-alias: last segment of modelId, skip if already exists
+        const parts = modelId.split("/");
+        const autoAlias = parts[parts.length - 1];
+        if (modelAliases[autoAlias]) continue;
+        await onSetAlias(modelId, autoAlias, providerStorageAlias);
         importedCount += 1;
       }
       if (importedCount === 0) {
-        alert("No new models were added.");
+        alert("No new models were added (all aliases already exist).");
       }
     } catch (error) {
       console.log("Error importing models:", error);
@@ -1259,43 +1346,66 @@ function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, m
         Add {isAnthropic ? "Anthropic" : "OpenAI"}-compatible models manually or import them from the /models endpoint.
       </p>
 
-      <div className="flex items-end gap-2 flex-wrap">
-        <div className="flex-1 min-w-[240px]">
-          <label htmlFor="new-compatible-model-input" className="text-xs text-text-muted mb-1 block">Model ID</label>
-          <input
-            id="new-compatible-model-input"
-            type="text"
-            value={newModel}
-            onChange={(e) => setNewModel(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-            placeholder={isAnthropic ? "claude-3-opus-20240229" : "gpt-4o"}
-            className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-primary"
-          />
+      {/* Add form: 2 fields */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-end gap-2 flex-wrap">
+          <div className="flex-1 min-w-[160px]">
+            <label className="text-xs text-text-muted mb-1 block">Alias Model <span className="text-text-muted/60">(Client Request)</span></label>
+            <input
+              type="text"
+              value={newAlias}
+              onChange={(e) => { setNewAlias(e.target.value); setAddError(""); }}
+              onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+              placeholder="claude-opus-4-5-20251101"
+              className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-primary font-mono"
+            />
+          </div>
+          <span className="material-symbols-outlined text-text-muted text-base mb-2">arrow_forward</span>
+          <div className="flex-1 min-w-[160px]">
+            <label className="text-xs text-text-muted mb-1 block">Model ID (on 9Router)</label>
+            <input
+              type="text"
+              value={newModel}
+              onChange={(e) => { setNewModel(e.target.value); setAddError(""); }}
+              onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+              placeholder="cx/gpt-5.4"
+              className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-primary font-mono"
+            />
+          </div>
+          <Button size="sm" icon="add" onClick={handleAdd} disabled={!newAlias.trim() || !newModel.trim() || adding}>
+            {adding ? "Adding..." : "Add"}
+          </Button>
+          <Button size="sm" variant="secondary" icon="download" onClick={handleImport} disabled={!canImport || importing}>
+            {importing ? "Importing..." : "Import from /models"}
+          </Button>
         </div>
-        <Button size="sm" icon="add" onClick={handleAdd} disabled={!newModel.trim() || adding}>
-          {adding ? "Adding..." : "Add"}
-        </Button>
-        <Button size="sm" variant="secondary" icon="download" onClick={handleImport} disabled={!canImport || importing}>
-          {importing ? "Importing..." : "Import from /models"}
-        </Button>
+        {addError && (
+          <p className="text-xs text-red-500 flex items-center gap-1">
+            <span className="material-symbols-outlined text-sm">error</span>
+            {addError}
+          </p>
+        )}
+        {!canImport && (
+          <p className="text-xs text-text-muted">Add a connection to enable importing models.</p>
+        )}
       </div>
-
-      {!canImport && (
-        <p className="text-xs text-text-muted">
-          Add a connection to enable importing models.
-        </p>
-      )}
 
       {allModels.length > 0 && (
         <div className="flex flex-col gap-3">
           {allModels.map(({ modelId, fullModel, alias }) => (
             <PassthroughModelRow
-              key={fullModel}
+              key={alias}
+              alias={alias}
               modelId={modelId}
-              fullModel={`${providerDisplayAlias}/${modelId}`}
+              fullModel={fullModel}
+              providerDisplayAlias={providerDisplayAlias}
               copied={copied}
               onCopy={onCopy}
               onDeleteAlias={() => onDeleteAlias(alias)}
+              onEdit={() => setEditingAlias(alias)}
+              isEditing={editingAlias === alias}
+              onSaveEdit={(newAliasVal, newModelIdVal) => handleSaveEdit(alias, newAliasVal, newModelIdVal)}
+              onCancelEdit={() => setEditingAlias(null)}
               onTest={connections.length > 0 ? () => handleTestModel(modelId) : undefined}
               testStatus={modelTestResults[modelId]}
               isTesting={testingModelId === modelId}
@@ -1714,7 +1824,7 @@ function AddApiKeyModal({ isOpen, provider, providerName, isCompatible, isAnthro
         )}
         {isCompatible && (
           <p className="text-xs text-text-muted">
-            {isAnthropic 
+            {isAnthropic
               ? `Validation checks ${providerName || "Anthropic Compatible"} by verifying the API key.`
               : `Validation checks ${providerName || "OpenAI Compatible"} via /models on your base URL.`
             }
@@ -1833,6 +1943,9 @@ function EditConnectionModal({ isOpen, connection, proxyPools, onSave, onClose }
     }
   };
 
+  // Derive isOAuth here so it is available in handleSubmit below
+  const isOAuth = connection?.authType === "oauth";
+
   const handleSubmit = async () => {
     setSaving(true);
     try {
@@ -1874,19 +1987,17 @@ function EditConnectionModal({ isOpen, connection, proxyPools, onSave, onClose }
   };
 
   if (!connection) return null;
-
-  const isOAuth = connection.authType === "oauth";
   const isCompatible = isOpenAICompatibleProvider(connection.provider) || isAnthropicCompatibleProvider(connection.provider);
 
   return (
     <Modal isOpen={isOpen} title="Edit Connection" onClose={onClose}>
       <div className="flex flex-col gap-4">
-          <Input
-            label="Name"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+        <Input
+          label="Name"
+          value={formData.name}
+          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
           placeholder={isOAuth ? "Account name" : "Production Key"}
-          />
+        />
         {isOAuth && connection.email && (
           <div className="bg-sidebar/50 p-3 rounded-lg">
             <p className="text-sm text-text-muted mb-1">Email</p>
