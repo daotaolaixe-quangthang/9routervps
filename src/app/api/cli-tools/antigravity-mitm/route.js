@@ -23,6 +23,16 @@ function getPassword(provided) {
   return provided || getCachedPassword() || null;
 }
 
+function checkIsAdmin() {
+  if (!isWin) return true;
+  try {
+    require("child_process").execSync("net session >nul 2>&1", { windowsHide: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // GET - Full MITM status (server + per-tool DNS)
 export async function GET() {
   try {
@@ -33,7 +43,8 @@ export async function GET() {
       certExists: status.certExists || false,
       certTrusted: status.certTrusted || false,
       dnsStatus: status.dnsStatus || {},
-      hasCachedPassword: !!getCachedPassword(),
+      hasCachedPassword: !!getCachedPassword() || !!(await loadEncryptedPassword()),
+      isAdmin: checkIsAdmin(),
     });
   } catch (error) {
     console.log("Error getting MITM status:", error.message);

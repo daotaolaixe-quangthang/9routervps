@@ -744,6 +744,20 @@ export const DEFAULT_PRICING = {
 
   // MiniMax
   minimax: {
+    "MiniMax-M2.7": {
+      input: 0.50,
+      output: 2.00,
+      cached: 0.25,
+      reasoning: 3.00,
+      cache_creation: 0.50
+    },
+    "MiniMax-M2.5": {
+      input: 0.50,
+      output: 2.00,
+      cached: 0.25,
+      reasoning: 3.00,
+      cache_creation: 0.50
+    },
     "MiniMax-M2.1": {
       input: 0.50,
       output: 2.00,
@@ -751,7 +765,36 @@ export const DEFAULT_PRICING = {
       reasoning: 3.00,
       cache_creation: 0.50
     }
+  },
+
+  // DeepSeek (official API pricing: https://api-docs.deepseek.com/quick_start/pricing)
+  deepseek: {
+    "deepseek-chat": {
+      input: 0.28,
+      output: 0.42,
+      cached: 0.028,
+      reasoning: 0.42,
+      cache_creation: 0.28
+    },
+    "deepseek-reasoner": {
+      input: 0.28,
+      output: 0.42,
+      cached: 0.028,
+      reasoning: 0.42,
+      cache_creation: 0.28
+    }
   }
+};
+
+/**
+ * Provider-agnostic fallback pricing, keyed by model base name.
+ * Used when provider-specific lookup fails (e.g. openrouter, cu, fireworks use prefixed model IDs).
+ * Strip prefix before lookup: "deepseek/deepseek-chat" → "deepseek-chat"
+ */
+export const MODEL_PRICING = {
+  // DeepSeek
+  "deepseek-chat":     { input: 0.28, output: 0.42, cached: 0.028, reasoning: 0.42, cache_creation: 0.28 },
+  "deepseek-reasoner": { input: 0.28, output: 0.42, cached: 0.028, reasoning: 0.42, cache_creation: 0.28 },
 };
 
 /**

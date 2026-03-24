@@ -1,7 +1,7 @@
 const fs = require("fs");
 const crypto = require("crypto");
 const { exec } = require("child_process");
-const { execWithPassword } = require("../dns/dnsConfig.js");
+const { execWithPassword, isSudoAvailable } = require("../dns/dnsConfig.js");
 const { log, err } = require("../logger");
 
 const IS_WIN = process.platform === "win32";
@@ -45,7 +45,7 @@ function checkCertInstalledMac(certPath) {
 function checkCertInstalledWindows(certPath) {
   return new Promise((resolve) => {
     // Check Root store for our Root CA by common name
-    exec("certutil -store Root \"9Router MITM Root CA\"", (error) => {
+    exec("certutil -store Root \"9Router MITM Root CA\"", { windowsHide: true }, (error) => {
       resolve(!error);
     });
   });
@@ -88,11 +88,10 @@ async function installCertMac(sudoPassword, certPath) {
 }
 
 async function installCertWindows(certPath) {
-  const escaped = certPath.replace(/'/g, "''");
-  const psCommand = `Start-Process certutil -ArgumentList '-addstore','Root','${escaped}' -Verb RunAs -Wait -WindowStyle Hidden`;
+  // Process already has admin rights — run certutil directly, no UAC needed
   return new Promise((resolve, reject) => {
     exec(
-      `powershell -NonInteractive -WindowStyle Hidden -Command "${psCommand}"`,
+      `certutil -addstore Root "${certPath}"`,
       { windowsHide: true },
       (error) => {
         if (error) reject(new Error(`Failed to install certificate: ${error.message}`));
@@ -133,10 +132,10 @@ async function uninstallCertMac(sudoPassword, certPath) {
 }
 
 async function uninstallCertWindows() {
-  const psCommand = `Start-Process certutil -ArgumentList '-delstore','Root','9Router MITM Root CA' -Verb RunAs -Wait -WindowStyle Hidden`;
+  // Process already has admin rights — run certutil directly, no UAC needed
   return new Promise((resolve, reject) => {
     exec(
-      `powershell -NonInteractive -WindowStyle Hidden -Command "${psCommand}"`,
+      `certutil -delstore Root "9Router MITM Root CA"`,
       { windowsHide: true },
       (error) => {
         if (error) reject(new Error(`Failed to uninstall certificate: ${error.message}`));
@@ -152,6 +151,10 @@ function checkCertInstalledLinux() {
 }
 
 async function installCertLinux(sudoPassword, certPath) {
+  if (!isSudoAvailable()) {
+    log(`🔐 Cert: cannot install to system store without sudo — trust this file on clients: ${certPath}`);
+    return;
+  }
   const destFile = `${LINUX_CERT_DIR}/9router-root-ca.crt`;
   // Try update-ca-certificates (Debian/Ubuntu), fallback to update-ca-trust (Fedora/RHEL)
   const cmd = `cp "${certPath}" "${destFile}" && (update-ca-certificates 2>/dev/null || update-ca-trust 2>/dev/null || true)`;
@@ -164,6 +167,9 @@ async function installCertLinux(sudoPassword, certPath) {
 }
 
 async function uninstallCertLinux(sudoPassword) {
+  if (!isSudoAvailable()) {
+    return;
+  }
   const destFile = `${LINUX_CERT_DIR}/9router-root-ca.crt`;
   const cmd = `rm -f "${destFile}" && (update-ca-certificates 2>/dev/null || update-ca-trust 2>/dev/null || true)`;
   try {
