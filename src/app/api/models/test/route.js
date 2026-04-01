@@ -14,7 +14,7 @@ export async function POST(request) {
     const baseUrl =
       process.env.BASE_URL ||
       process.env.NEXT_PUBLIC_BASE_URL ||
-      `${url.protocol}//${url.host}`;
+      (() => { const u = new URL(request.url); return `${u.protocol}//${u.host}`; })();
 
     // Get an active internal API key for auth (if requireApiKey is enabled)
     let apiKey = null;
