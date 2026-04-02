@@ -2,6 +2,7 @@ import { BaseExecutor } from "./base.js";
 import { CODEX_DEFAULT_INSTRUCTIONS } from "../config/codexInstructions.js";
 import { PROVIDERS } from "../config/providers.js";
 import { normalizeResponsesInput } from "../translator/helpers/responsesApiHelper.js";
+import { refreshCodexToken } from "../services/tokenRefresh.js";
 
 /**
  * Codex Executor - handles OpenAI Codex API (Responses API format)
@@ -19,6 +20,18 @@ export class CodexExecutor extends BaseExecutor {
     const headers = super.buildHeaders(credentials, stream);
     headers["session_id"] = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
     return headers;
+  }
+
+  /**
+   * Override refreshCredentials to use Codex OAuth token refresh
+   * Called by chatCore when provider returns 401
+   */
+  async refreshCredentials(credentials, log) {
+    if (!credentials.refreshToken) {
+      log?.warn?.("CODEX", "No refresh token available for Codex credentials");
+      return null;
+    }
+    return await refreshCodexToken(credentials.refreshToken, log);
   }
 
   /**
