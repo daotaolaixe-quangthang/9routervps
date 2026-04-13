@@ -1,15 +1,21 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import PropTypes from "prop-types";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select } from "@/shared/components";
-import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal } from "@/shared/components";
+import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS, THINKING_CONFIG } from "@/shared/constants/providers";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
+import ModelRow from "./ModelRow";
+import PassthroughModelsSection from "./PassthroughModelsSection";
+import CompatibleModelsSection from "./CompatibleModelsSection";
+import ConnectionRow from "./ConnectionRow";
+import AddApiKeyModal from "./AddApiKeyModal";
+import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
+import AddCustomModelModal from "./AddCustomModelModal";
 
 export default function ProviderDetailPage() {
   const params = useParams();
@@ -37,6 +43,7 @@ export default function ProviderDetailPage() {
   const [bulkUpdatingProxy, setBulkUpdatingProxy] = useState(false);
   const [providerStrategy, setProviderStrategy] = useState(null); // null = use global, "round-robin" = override
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
+  const [thinkingMode, setThinkingMode] = useState("auto");
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [kiloFreeModels, setKiloFreeModels] = useState([]);
   const { copied, copy } = useCopyToClipboard();
@@ -53,13 +60,19 @@ export default function ProviderDetailPage() {
       }
     : (OAUTH_PROVIDERS[providerId] || APIKEY_PROVIDERS[providerId] || FREE_PROVIDERS[providerId]);
   const isOAuth = !!OAUTH_PROVIDERS[providerId] || !!FREE_PROVIDERS[providerId];
+  const isFreeNoAuth = !!FREE_PROVIDERS[providerId]?.noAuth;
   const models = getModelsByProviderId(providerId);
   const providerAlias = getProviderAlias(providerId);
 
   const isOpenAICompatible = isOpenAICompatibleProvider(providerId);
   const isAnthropicCompatible = isAnthropicCompatibleProvider(providerId);
   const isCompatible = isOpenAICompatible || isAnthropicCompatible;
+<<<<<<< HEAD
 
+=======
+  const thinkingConfig = AI_PROVIDERS[providerId]?.thinkingConfig || THINKING_CONFIG.extended;
+  
+>>>>>>> master
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
   const providerDisplayAlias = isCompatible
     ? (providerNode?.prefix || providerId)
@@ -110,6 +123,9 @@ export default function ProviderDetailPage() {
       const override = (settingsData.providerStrategies || {})[providerId] || {};
       setProviderStrategy(override.fallbackStrategy || null);
       setProviderStickyLimit(override.stickyRoundRobinLimit != null ? String(override.stickyRoundRobinLimit) : "1");
+      // Load per-provider thinking config
+      const thinkingCfg = (settingsData.providerThinking || {})[providerId] || {};
+      setThinkingMode(thinkingCfg.mode || "auto");
       if (nodesRes.ok) {
         let node = (nodesData.nodes || []).find((entry) => entry.id === providerId) || null;
 
@@ -194,6 +210,32 @@ export default function ProviderDetailPage() {
   const handleStickyLimitChange = (value) => {
     setProviderStickyLimit(value);
     saveProviderStrategy("round-robin", value);
+  };
+
+  const saveThinkingConfig = async (mode) => {
+    try {
+      const settingsRes = await fetch("/api/settings", { cache: "no-store" });
+      const settingsData = settingsRes.ok ? await settingsRes.json() : {};
+      const current = settingsData.providerThinking || {};
+      const updated = { ...current };
+      if (!mode || mode === "auto") {
+        delete updated[providerId];
+      } else {
+        updated[providerId] = { mode };
+      }
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerThinking: updated }),
+      });
+    } catch (error) {
+      console.log("Error saving thinking config:", error);
+    }
+  };
+
+  const handleThinkingModeChange = (mode) => {
+    setThinkingMode(mode);
+    saveThinkingConfig(mode);
   };
 
   useEffect(() => {
@@ -548,10 +590,11 @@ export default function ProviderDetailPage() {
       );
     }
     // Combine hardcoded models with Kilo free models (deduplicated)
+    // Exclude non-llm models (embedding, tts, etc.) — they have dedicated pages under media-providers
     const displayModels = [
       ...models,
       ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
-    ];
+    ].filter((m) => !m.type || m.type === "llm");
     // Custom models added by user (stored as aliases: modelId → providerAlias/modelId)
     const customModels = Object.entries(modelAliases)
       .filter(([alias, fullModel]) => {
@@ -588,7 +631,7 @@ export default function ProviderDetailPage() {
               onSetAlias={(alias) => handleSetAlias(model.id, alias, providerStorageAlias)}
               onDeleteAlias={() => handleDeleteAlias(existingAlias)}
               testStatus={modelTestResults[model.id]}
-              onTest={connections.length > 0 ? () => handleTestModel(model.id) : undefined}
+              onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
               isTesting={testingModelId === model.id}
               isFree={model.isFree}
             />
@@ -607,9 +650,10 @@ export default function ProviderDetailPage() {
             onSetAlias={() => { }}
             onDeleteAlias={() => handleDeleteAlias(model.alias)}
             testStatus={modelTestResults[model.id]}
-            onTest={connections.length > 0 ? () => handleTestModel(model.id) : undefined}
+            onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
             isTesting={testingModelId === model.id}
             isCustom
+            isFree={false}
           />
         ))}
 
@@ -728,22 +772,22 @@ export default function ProviderDetailPage() {
       </div>
 
       {providerInfo.deprecated && (
-        <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-black/[0.02] dark:bg-white/[0.02] border border-black/[0.05] dark:border-white/[0.05]">
-          <span className="material-symbols-outlined text-[16px] text-text-muted mt-0.5 shrink-0">info</span>
-          <p className="text-xs text-text-muted leading-relaxed">{providerInfo.deprecationNotice}</p>
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
+          <span className="material-symbols-outlined text-[16px] text-yellow-500 mt-0.5 shrink-0">warning</span>
+          <p className="text-xs text-red-600 dark:text-yellow-400 leading-relaxed">{providerInfo.deprecationNotice}</p>
         </div>
       )}
 
       {providerInfo.notice && !providerInfo.deprecated && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-black/[0.02] dark:bg-white/[0.02] border border-black/[0.05] dark:border-white/[0.05]">
-          <span className="material-symbols-outlined text-[16px] text-text-muted shrink-0">info</span>
-          <p className="text-xs text-text-muted leading-relaxed">{providerInfo.notice.text}</p>
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30">
+          <span className="material-symbols-outlined text-[16px] text-blue-500 shrink-0">info</span>
+          <p className="text-xs text-blue-600 dark:text-blue-400 leading-relaxed">{providerInfo.notice.text}</p>
           {providerInfo.notice.apiKeyUrl && (
             <a
               href={providerInfo.notice.apiKeyUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-primary hover:underline shrink-0"
+              className="text-xs font-medium text-white bg-blue-500 hover:bg-blue-600 px-2 py-0.5 rounded shrink-0 transition-colors"
             >
               Get API Key →
             </a>
@@ -807,80 +851,111 @@ export default function ProviderDetailPage() {
       )}
 
       {/* Connections */}
-      <Card>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Connections</h2>
-          {/* Round Robin toggle */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-text-muted font-medium">Round Robin</span>
-            <Toggle
-              checked={providerStrategy === "round-robin"}
-              onChange={handleRoundRobinToggle}
-            />
-            {providerStrategy === "round-robin" && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-text-muted">Sticky:</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={providerStickyLimit}
-                  onChange={(e) => handleStickyLimitChange(e.target.value)}
-                  placeholder="1"
-                  className="w-14 px-2 py-1 text-xs border border-border rounded-md bg-background focus:outline-none focus:border-primary"
-                />
-              </div>
-            )}
-          </div>
-        </div>
-
-        {connections.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 text-primary mb-4">
-              <span className="material-symbols-outlined text-[32px]">{isOAuth ? "lock" : "key"}</span>
+      {isFreeNoAuth ? (
+        <Card>
+          <div className="flex items-center gap-3">
+            <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-green-500/10 text-green-500">
+              <span className="material-symbols-outlined text-[20px]">lock_open</span>
             </div>
-            <p className="text-text-main font-medium mb-1">No connections yet</p>
-            <p className="text-sm text-text-muted mb-4">Add your first connection to get started</p>
-            {!isCompatible && (
-              <div className="flex gap-2 justify-center">
-                {providerId === "iflow" && (
-                  <Button icon="cookie" variant="secondary" onClick={() => setShowIFlowCookieModal(true)}>
-                    Cookie Auth
-                  </Button>
-                )}
-                <Button icon="add" onClick={() => isOAuth ? setShowOAuthModal(true) : setShowAddApiKeyModal(true)}>
-                  {providerId === "iflow" ? "OAuth" : "Add Connection"}
-                </Button>
-              </div>
-            )}
+            <div>
+              <p className="text-sm font-medium">No authentication required</p>
+              <p className="text-xs text-text-muted">This provider is ready to use.</p>
+            </div>
           </div>
-        ) : (
-          <>
-            {connectionsList}
-            {!isCompatible && (
-              <div className="flex gap-2 mt-4">
-                {providerId === "iflow" && (
+        </Card>
+      ) : (
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Connections</h2>
+            <div className="flex items-center gap-4">
+              {/* Thinking config */}
+              {/* {thinkingConfig && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-text-muted font-medium">Thinking</span>
+                  <select
+                    value={thinkingMode}
+                    onChange={(e) => handleThinkingModeChange(e.target.value)}
+                    className="text-xs px-2 py-1 border border-border rounded-md bg-background focus:outline-none focus:border-primary"
+                  >
+                    {thinkingConfig.options.map((opt) => (
+                      <option key={opt} value={opt}>{opt.charAt(0).toUpperCase() + opt.slice(1)}</option>
+                    ))}
+                  </select>
+                </div>
+              )} */}
+              {/* Round Robin toggle */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-text-muted font-medium">Round Robin</span>
+                <Toggle
+                  checked={providerStrategy === "round-robin"}
+                  onChange={handleRoundRobinToggle}
+                />
+                {providerStrategy === "round-robin" && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-text-muted">Sticky:</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={providerStickyLimit}
+                      onChange={(e) => handleStickyLimitChange(e.target.value)}
+                      placeholder="1"
+                      className="w-14 px-2 py-1 text-xs border border-border rounded-md bg-background focus:outline-none focus:border-primary"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {connections.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 text-primary mb-4">
+                <span className="material-symbols-outlined text-[32px]">{isOAuth ? "lock" : "key"}</span>
+              </div>
+              <p className="text-text-main font-medium mb-1">No connections yet</p>
+              <p className="text-sm text-text-muted mb-4">Add your first connection to get started</p>
+              {!isCompatible && (
+                <div className="flex gap-2 justify-center">
+                  {providerId === "iflow" && (
+                    <Button icon="cookie" variant="secondary" onClick={() => setShowIFlowCookieModal(true)}>
+                      Cookie Auth
+                    </Button>
+                  )}
+                  <Button icon="add" onClick={() => isOAuth ? setShowOAuthModal(true) : setShowAddApiKeyModal(true)}>
+                    {providerId === "iflow" ? "OAuth" : "Add Connection"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              {connectionsList}
+              {!isCompatible && (
+                <div className="flex gap-2 mt-4">
+                  {providerId === "iflow" && (
+                    <Button
+                      size="sm"
+                      icon="cookie"
+                      variant="secondary"
+                      onClick={() => setShowIFlowCookieModal(true)}
+                      title="Add connection using browser cookie"
+                    >
+                      Cookie
+                    </Button>
+                  )}
                   <Button
                     size="sm"
-                    icon="cookie"
-                    variant="secondary"
-                    onClick={() => setShowIFlowCookieModal(true)}
-                    title="Add connection using browser cookie"
+                    icon="add"
+                    onClick={() => isOAuth ? setShowOAuthModal(true) : setShowAddApiKeyModal(true)}
                   >
-                    Cookie
+                    Add
                   </Button>
-                )}
-                <Button
-                  size="sm"
-                  icon="add"
-                  onClick={() => isOAuth ? setShowOAuthModal(true) : setShowAddApiKeyModal(true)}
-                >
-                  Add
-                </Button>
-              </div>
-            )}
-          </>
-        )}
-      </Card>
+                </div>
+              )}
+            </>
+          )}
+        </Card>
+      )}
 
       {/* Models */}
       <Card>

@@ -5,7 +5,7 @@ import { COLORS } from "../utils/stream.js";
 import { createStreamController } from "../utils/streamHandler.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
 import { createRequestLogger } from "../utils/requestLogger.js";
-import { getModelTargetFormat, PROVIDER_ID_TO_ALIAS } from "../config/providerModels.js";
+import { getModelTargetFormat, getModelStrip, PROVIDER_ID_TO_ALIAS } from "../config/providerModels.js";
 import { createErrorResult, parseUpstreamError, formatProviderError } from "../utils/error.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { handleBypassRequest } from "../utils/bypassHandler.js";
@@ -15,6 +15,7 @@ import { buildRequestDetail, extractRequestConfig } from "./chatCore/requestDeta
 import { handleForcedSSEToJson } from "./chatCore/sseToJsonHandler.js";
 import { handleNonStreamingResponse } from "./chatCore/nonStreamingHandler.js";
 import { handleStreamingResponse, buildOnStreamComplete } from "./chatCore/streamingHandler.js";
+import { detectClientTool, isNativePassthrough } from "../utils/clientDetector.js";
 
 /**
  * Core chat handler - shared between SSE and Worker
@@ -23,7 +24,7 @@ import { handleStreamingResponse, buildOnStreamComplete } from "./chatCore/strea
  * @param {object} options.credentials - Provider credentials
  * @param {string} options.sourceFormatOverride - Override detected source format (e.g. "openai-responses")
  */
-export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, requestId, ccFilterNaming, sourceFormatOverride }) {
+export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, requestId, ccFilterNaming, sourceFormatOverride, providerThinking }) {
   const { provider, model } = modelInfo;
   const requestStartTime = Date.now();
 
@@ -36,6 +37,21 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const alias = PROVIDER_ID_TO_ALIAS[provider] || provider;
   const modelTargetFormat = getModelTargetFormat(alias, model);
   const targetFormat = modelTargetFormat || getTargetFormat(provider);
+  const stripList = getModelStrip(alias, model);
+
+  // Inject provider-level thinking config override (only if client hasn't set)
+  // on/off → extended type (body.thinking), none/low/medium/high → effort type (body.reasoning_effort)
+  if (providerThinking?.mode && providerThinking.mode !== "auto") {
+    const mode = providerThinking.mode;
+    if (mode === "on" && !body.thinking) {
+      console.log("Injecting provider-level thinking config override: on");
+      body = { ...body, thinking: { type: "enabled", budget_tokens: 10000 } };
+    } else if (mode === "off" && !body.thinking) {
+      body = { ...body, thinking: { type: "disabled" } };
+    } else if (!body.reasoning_effort) {
+      body = { ...body, reasoning_effort: mode };
+    }
+  }
 
   const clientRequestedStreaming = body.stream === true || sourceFormat === FORMATS.ANTIGRAVITY || sourceFormat === FORMATS.GEMINI || sourceFormat === FORMATS.GEMINI_CLI || sourceFormat === FORMATS.OPENAI_RESPONSES;
   const providerRequiresStreaming = provider === "openai" || provider === "codex";
@@ -55,14 +71,26 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   reqLogger.logRawRequest(body);
   log?.debug?.("FORMAT", `${sourceFormat} → ${targetFormat} | stream=${stream}`);
 
-  let translatedBody = translateRequest(sourceFormat, targetFormat, model, body, stream, credentials, provider, reqLogger);
-  if (!translatedBody) {
-    trackPendingRequest(model, provider, connectionId, false, true);
-    return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Failed to translate request for ${sourceFormat} → ${targetFormat}`);
+  // Native passthrough: CLI tool and provider are the same ecosystem
+  // Skip all translation/normalization — only model and Bearer are swapped
+  const clientTool = detectClientTool(clientRawRequest?.headers || {}, body);
+  const passthrough = isNativePassthrough(clientTool, provider);
+
+  let translatedBody;
+  let toolNameMap;
+  if (passthrough) {
+    log?.debug?.("PASSTHROUGH", `${clientTool} → ${provider} | native lossless`);
+    translatedBody = { ...body, model };
+  } else {
+    translatedBody = translateRequest(sourceFormat, targetFormat, model, body, stream, credentials, provider, reqLogger, stripList, connectionId);
+    if (!translatedBody) {
+      trackPendingRequest(model, provider, connectionId, false, true);
+      return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Failed to translate request for ${sourceFormat} → ${targetFormat}`);
+    }
+    toolNameMap = translatedBody._toolNameMap;
+    delete translatedBody._toolNameMap;
+    translatedBody.model = model;
   }
-  const toolNameMap = translatedBody._toolNameMap;
-  delete translatedBody._toolNameMap;
-  translatedBody.model = model;
 
   const executor = getExecutor(provider);
   trackPendingRequest(model, provider, connectionId, true);
@@ -84,9 +112,14 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     connectionProxyEnabled: credentials?.providerSpecificData?.connectionProxyEnabled === true,
     connectionProxyUrl: credentials?.providerSpecificData?.connectionProxyUrl || "",
     connectionNoProxy: credentials?.providerSpecificData?.connectionNoProxy || "",
+    vercelRelayUrl: credentials?.providerSpecificData?.vercelRelayUrl || "",
   };
 
-  if (proxyOptions.connectionProxyEnabled && proxyOptions.connectionProxyUrl) {
+  if (proxyOptions.vercelRelayUrl) {
+    const connectionName = credentials?.connectionName || credentials?.connectionId || "unknown";
+    const poolId = credentials?.providerSpecificData?.connectionProxyPoolId || "none";
+    log?.info?.("PROXY", `${provider.toUpperCase()} | ${model} | conn=${connectionName} | pool=${poolId} | vercel-relay=${proxyOptions.vercelRelayUrl}`);
+  } else if (proxyOptions.connectionProxyEnabled && proxyOptions.connectionProxyUrl) {
     let maskedProxyUrl = proxyOptions.connectionProxyUrl;
     try {
       const parsed = new URL(proxyOptions.connectionProxyUrl);
