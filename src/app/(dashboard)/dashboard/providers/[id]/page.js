@@ -67,12 +67,9 @@ export default function ProviderDetailPage() {
   const isOpenAICompatible = isOpenAICompatibleProvider(providerId);
   const isAnthropicCompatible = isAnthropicCompatibleProvider(providerId);
   const isCompatible = isOpenAICompatible || isAnthropicCompatible;
-<<<<<<< HEAD
 
-=======
   const thinkingConfig = AI_PROVIDERS[providerId]?.thinkingConfig || THINKING_CONFIG.extended;
   
->>>>>>> master
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
   const providerDisplayAlias = isCompatible
     ? (providerNode?.prefix || providerId)
